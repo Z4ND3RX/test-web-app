@@ -167,7 +167,7 @@ jobs:
             
             # Clean up old images (keep last 3)
             sudo docker image prune -af --filter "until=48h"
-            sudo docker images | grep $ECR_REPOSITORY | tail -n +4 | awk '{print $3}' | xargs -r sudo docker rmi -f
+            sudo docker images | grep $ECR_REPOSITORY | tail -n +4 | awk '{print $3}' | xargs -r sudo docker rmi -f || true
             
             # Verify deployment
             echo "Waiting for container to start..."
