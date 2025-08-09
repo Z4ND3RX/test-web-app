@@ -1,0 +1,155 @@
+name: Web App Deployment Pipeline
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
+  APP_NAME: webapp
+  FRONTEND_PORT: 4200
+  DOCKER_NETWORK: webapp-network
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Build Web App
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, Tag and Push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          build-args: |
+            NODE_ENV=production
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 host to known_hosts
+        run: ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2 with SSL
+        env:
+          DOMAIN: web-app-fineract-fiter.duckdns.org
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -euxo pipefail
+            
+            # Authenticate with ECR
+            aws ecr get-login-password --region $AWS_REGION | \
+              docker login --username AWS --password-stdin $ECR_REPOSITORY
+            
+            # Create network if not exists
+            docker network create $DOCKER_NETWORK || true
+            
+            # Stop and remove old container if exists
+            docker stop $APP_NAME || true
+            docker rm $APP_NAME || true
+            
+            # Pull new image (using commit SHA for precise deployment)
+            docker pull $ECR_REPOSITORY:$IMAGE_TAG
+            
+            # Run new container with health check and restart policy
+            docker run -d \
+              --name $APP_NAME \
+              --network $DOCKER_NETWORK \
+              --restart unless-stopped \
+              --health-cmd "curl -f http://localhost:80 || exit 1" \
+              --health-interval 30s \
+              --health-timeout 10s \
+              --health-retries 3 \
+              -e NODE_ENV=production \
+              -e FINERACT_API_URL=https://$DOMAIN/fineract-provider \
+              -e FINERACT_API_URLS=https://$DOMAIN/fineract-provider \
+              -e FINERACT_PLATFORM_TENANT_IDENTIFIER=default \
+              -p $FRONTEND_PORT:80 \
+              -v /etc/letsencrypt:/etc/letsencrypt:ro \
+              -v webapp-data:/usr/share/nginx/html \
+              $ECR_REPOSITORY:$IMAGE_TAG
+            
+            # Clean up old images
+            docker image prune -af --filter "until=48h"
+            
+            # Verify deployment
+            sleep 10
+            docker ps -a
+            docker logs --tail 50 $APP_NAME
+            
+            # Update Nginx configuration if needed
+            if [ -f /etc/nginx/sites-available/webapp ]; then
+              sudo certbot renew --quiet --no-self-upgrade
+              sudo systemctl reload nginx
+            fi
+          EOF

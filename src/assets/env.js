@@ -3,13 +3,13 @@
 
   // BackEnd Environment variables
   window["env"]["fineractApiUrls"] = '';
-  window["env"]["fineractApiUrl"]  = '';
+  window["env"]["fineractApiUrl"]  = 'https://52.15.88.237:8443';
 
-  window["env"]["apiProvider"] = '';
-  window["env"]["apiVersion"]  = '';
+  window["env"]["apiProvider"] = '/fineract-provider/api';
+  window["env"]["apiVersion"]  = '/v1';
 
-  window["env"]["fineractPlatformTenantId"]  = '';
-  window["env"]["fineractPlatformTenantIds"]  = '';
+  window["env"]["fineractPlatformTenantId"]  = 'default';
+  window["env"]["fineractPlatformTenantIds"]  = 'default';
 
   // Language Environment variables
   window["env"]["defaultLanguage"] = '';
