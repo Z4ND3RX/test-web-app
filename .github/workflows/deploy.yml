@@ -101,10 +101,24 @@ jobs:
 
       - name: Deploy to EC2 with SSL
         env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           DOMAIN: web-app-fineract-fiter.duckdns.org
+          APP_NAME: webapp
+          FRONTEND_PORT: 4200
+          DOCKER_NETWORK: webapp-network
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -euxo pipefail
+            
+            # Verificar variables requeridas
+            for var in AWS_REGION ECR_REPOSITORY DOMAIN APP_NAME FRONTEND_PORT DOCKER_NETWORK IMAGE_TAG; do
+              if [ -z "${!var}" ]; then
+                echo "ERROR: Variable $var no está definida"
+                exit 1
+              fi
+            done
             
             # Authenticate with ECR
             aws ecr get-login-password --region $AWS_REGION | \
@@ -117,10 +131,10 @@ jobs:
             docker stop $APP_NAME || true
             docker rm $APP_NAME || true
             
-            # Pull new image (using commit SHA for precise deployment)
+            # Pull new image
             docker pull $ECR_REPOSITORY:$IMAGE_TAG
             
-            # Run new container with health check and restart policy
+            # Run new container
             docker run -d \
               --name $APP_NAME \
               --network $DOCKER_NETWORK \
