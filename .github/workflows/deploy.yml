@@ -132,7 +132,7 @@ jobs:
               docker login --username AWS --password-stdin $ECR_REPOSITORY
             
             # Create network if not exists
-            docker network inspect $DOCKER_NETWORK &>/dev/null || docker network create $DOCKER_NETWORK
+            sudo docker network inspect $DOCKER_NETWORK &>/dev/null || sudo docker network create $DOCKER_NETWORK
             
             # Stop and remove old container if exists
             docker stop $APP_NAME || true
