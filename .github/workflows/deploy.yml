@@ -109,11 +109,13 @@ jobs:
           DOCKER_NETWORK: webapp-network
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOSSH'
+            #!/bin/bash
             set -euxo pipefail
             
             # Verificar variables requeridas
-            for var in AWS_REGION ECR_REPOSITORY DOMAIN APP_NAME FRONTEND_PORT DOCKER_NETWORK IMAGE_TAG; do
+            required_vars=("AWS_REGION" "ECR_REPOSITORY" "DOMAIN" "APP_NAME" "FRONTEND_PORT" "DOCKER_NETWORK" "IMAGE_TAG")
+            for var in "${required_vars[@]}"; do
               if [ -z "${!var}" ]; then
                 echo "ERROR: Variable $var no está definida"
                 exit 1
@@ -125,21 +127,27 @@ jobs:
               docker login --username AWS --password-stdin $ECR_REPOSITORY
             
             # Create network if not exists
-            docker network create $DOCKER_NETWORK || true
+            docker network inspect $DOCKER_NETWORK &>/dev/null || docker network create $DOCKER_NETWORK
             
             # Stop and remove old container if exists
             docker stop $APP_NAME || true
             docker rm $APP_NAME || true
             
-            # Pull new image
-            docker pull $ECR_REPOSITORY:$IMAGE_TAG
+            # Pull new image with retry logic
+            for i in {1..3}; do
+              if docker pull $ECR_REPOSITORY:$IMAGE_TAG; then
+                break
+              fi
+              sleep 5
+              echo "Retrying to pull image (attempt $i/3)..."
+            done
             
-            # Run new container
+            # Run new container with health check
             docker run -d \
               --name $APP_NAME \
               --network $DOCKER_NETWORK \
               --restart unless-stopped \
-              --health-cmd "curl -f http://localhost:80 || exit 1" \
+              --health-cmd "curl -f http://localhost:$FRONTEND_PORT || exit 1" \
               --health-interval 30s \
               --health-timeout 10s \
               --health-retries 3 \
@@ -152,17 +160,24 @@ jobs:
               -v webapp-data:/usr/share/nginx/html \
               $ECR_REPOSITORY:$IMAGE_TAG
             
-            # Clean up old images
+            # Clean up old images (keep last 3)
             docker image prune -af --filter "until=48h"
+            docker images | grep $ECR_REPOSITORY | tail -n +4 | awk '{print $3}' | xargs -r docker rmi -f
             
             # Verify deployment
+            echo "Waiting for container to start..."
             sleep 10
             docker ps -a
+            docker inspect --format '{{json .State.Health }}' $APP_NAME
             docker logs --tail 50 $APP_NAME
             
-            # Update Nginx configuration if needed
-            if [ -f /etc/nginx/sites-available/webapp ]; then
+            # Update Nginx and SSL certificates
+            if [ -f /etc/nginx/sites-available/$APP_NAME ]; then
               sudo certbot renew --quiet --no-self-upgrade
-              sudo systemctl reload nginx
+              sudo nginx -t && sudo systemctl reload nginx
+            else
+              echo "Nginx configuration not found, skipping reload"
             fi
-          EOF
+            
+            echo "Deployment completed successfully"
+          EOSSH
