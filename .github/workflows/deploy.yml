@@ -157,8 +157,8 @@ jobs:
               --health-timeout 10s \
               --health-retries 3 \
               -e NODE_ENV=production \
-              -e FINERACT_API_URL=https://$DOMAIN/fineract-provider \
-              -e FINERACT_API_URLS=https://$DOMAIN/fineract-provider \
+              -e FINERACT_API_URL=https://$DOMAIN \
+              -e FINERACT_API_URLS=https://$DOMAIN \
               -e FINERACT_PLATFORM_TENANT_IDENTIFIER=default \
               -p $FRONTEND_PORT:80 \
               -v /etc/letsencrypt:/etc/letsencrypt:ro \
