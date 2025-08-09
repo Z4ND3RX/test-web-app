@@ -5,7 +5,7 @@
   window["env"]["fineractApiUrls"] = '';
   window["env"]["fineractApiUrl"]  = 'https://52.15.88.237:8443';
 
-  window["env"]["apiProvider"] = '/fineract-provider/api';
+  window["env"]["apiProvider"] = '/api';
   window["env"]["apiVersion"]  = '/v1';
 
   window["env"]["fineractPlatformTenantId"]  = 'default';
