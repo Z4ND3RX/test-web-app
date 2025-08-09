@@ -109,11 +109,16 @@ jobs:
           DOCKER_NETWORK: webapp-network
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOSSH'
-            #!/bin/bash
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+          AWS_REGION="${AWS_REGION}" \
+          ECR_REPOSITORY="${ECR_REPOSITORY}" \
+          DOMAIN="${DOMAIN}" \
+          APP_NAME="${APP_NAME}" \
+          FRONTEND_PORT="${FRONTEND_PORT}" \
+          DOCKER_NETWORK="${DOCKER_NETWORK}" \
+          IMAGE_TAG="${IMAGE_TAG}" \
+          'bash -s' << 'EOSSH'
             set -euxo pipefail
-            
-            # Verificar variables requeridas
             required_vars=("AWS_REGION" "ECR_REPOSITORY" "DOMAIN" "APP_NAME" "FRONTEND_PORT" "DOCKER_NETWORK" "IMAGE_TAG")
             for var in "${required_vars[@]}"; do
               if [ -z "${!var}" ]; then
